@@ -10,40 +10,21 @@
  * Token - Twitch oAuth Token with 'clip:edit' permissions, don't include 'oauth:'
  * Channel - This must be the Twitch Channel ID, not the Twitch Username.
  */
-
-if (!isset($jsonData)) {
-    $jsonData = new stdClass();
-}
-if (!isset($error_message)) {
-    $error_message = new stdClass();
-}
+header('Content-Type: text/plain');
 
 $oauth_token = isset($_GET['oauth']) ? $_GET['oauth'] : '';
-if (empty($oauth_token)) {
-    header("Content-Type: application/json; charset=UTF-8");
-    $jsonData->error = 'Bad Request';
-    $jsonData->status = 422;
-    $jsonData->message = 'missing oauth token!';
-    $myJson = json_encode($jsonData);
-    die($myJson);
-}
-
 $channel_id = isset($_GET['channel']) ? $_GET['channel'] : '';
-if (empty($channel_id)) {
-    header("Content-Type: application/json; charset=UTF-8");
-    $jsonData->error = 'Bad Request';
-    $jsonData->status = 422;
-    $jsonData->message = 'missing channel id!';
-    $myJson = json_encode($jsonData);
-    die($myJson);
+
+if (empty($oauth_token) || empty($channel_id)) {
+    die('error: ' . (empty($oauth_token) ? 'missing oauth token!' : 'missing channel id!'));
 }
 
 $vtries = 0;
-$verifed = FALSE;
+$verifed = false;
 $clip = getClip();
 
 if (!empty($clip)) {
-    while ($verifed !== TRUE) {
+    while ($verifed !== true) {
         $test = verifyClip($clip);
         if (strcasecmp($clip, $test) === 0) {
             $verifed = TRUE;
@@ -58,23 +39,15 @@ if (!empty($clip)) {
 }
 
 if (!empty($error_message)) {
-    header("Content-Type: application/json; charset=UTF-8");
     echo $error_message;
 } elseif ($verifed || !empty($clip)) {
-    header('Content-Type: text/plain');
     echo 'https://clips.twitch.tv/' . $clip;
 } else {
-    header("Content-Type: application/json; charset=UTF-8");
-    $jsonData->error = 'Bad Request';
-    $jsonData->status = 422;
-    $jsonData->message = 'unexpected error!';
-    $myJson = json_encode($jsonData);
-    echo $myJson;
+    echo 'unexpected error!';
 }
 
 function getClip() {
-    global $error_message, $channel_id, $oauth_token, $jsonData;
-    $id = '';
+    global $error_message, $channel_id, $oauth_token;
 
     $get_clip = curl_init();
     curl_setopt($get_clip, CURLOPT_URL, 'https://api.twitch.tv/helix/clips?broadcaster_id=' . $channel_id);
@@ -87,19 +60,13 @@ function getClip() {
     $get_result = curl_exec($get_clip);
 
     if (curl_errno($get_clip)) {
-        $jsonData->error = 'Bad Request';
-        $jsonData->status = 422;
-        $jsonData->message = curl_error($get_clip);
-        $error_message = json_encode($jsonData);
+        $error_message = curl_error($get_clip);
     } else {
         $json_data = json_decode($get_result, true);
         if (null === $json_data['error']) {
             $id = $json_data['data']['0']['id'];
         } else {
-            $jsonData->error = 'Bad Request';
-            $jsonData->status = 422;
-            $jsonData->message = $json_data['message'];
-            $error_message = json_encode($jsonData);
+            $error_message = $json_data['message'];
         }
     }
 
@@ -108,8 +75,7 @@ function getClip() {
 }
 
 function verifyClip($clipID) {
-    global $error_message, $oauth_token, $jsonData;
-    $cid = '';
+    global $error_message, $oauth_token;
 
     $get = curl_init();
     curl_setopt($get, CURLOPT_URL, 'https://api.twitch.tv/helix/clips?id=' . $clipID);
@@ -121,10 +87,7 @@ function verifyClip($clipID) {
     $result = curl_exec($get);
 
     if (curl_errno($get)) {
-        $jsonData->error = 'Bad Request';
-        $jsonData->status = 422;
-        $jsonData->message = curl_error($get);
-        $error_message = json_encode($jsonData);
+        $error_message = curl_error($get);
     } else {
         $data = json_decode($result, true);
         $cid = $data['data']['0']['id'];
