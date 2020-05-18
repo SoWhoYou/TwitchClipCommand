@@ -11,29 +11,10 @@ class ClipTracker {
         $this->auth = new Auth();
     }
 
-    public function exists($channelID) {
-        $exists = false;
-        try {
-            $this->conn = new mysqli(
-                $this->auth->mysql['clips_db_host'],
-                $this->auth->mysql['clips_db_user'],
-                $this->auth->mysql['clips_db_pass'],
-                $this->auth->mysql['clips_db_name']
-            );
-            if ($this->conn->connect_errno) {
-                // Should not have any errors to log
-            } else {
-                $flag = $this->conn->query("SELECT * FROM `$channelID`");
-                $exists = ($flag !== false) ? true : false;
-            }
-            $this->conn->close();
-        } catch (Exception $e) {
-            error_log('>> Channel ID: ' . $channelID . ' >> Clip Tracker > Exists >> ' . $e, 0);
-        }
-        return $exists;
-    }
-
-    public function log($channelID, $clipName) {
+    /**
+     * Log to Database, then to My Discord
+     */
+    public function log($channelID, $clipName, $verify, $sender) {
         try {
             $this->conn = new mysqli(
                 $this->auth->mysql['clips_db_host'],
@@ -51,35 +32,54 @@ class ClipTracker {
         } catch (Exception $e) {
             error_log('>> Channel ID: ' . $channelID . ' >> Clip ID: ' . $clipName . ' >> Clip Tracker > Log >> ' . $e, 0);
         }
-        $this->logToDiscord($channelID, $clipName);
+        $this->logToDiscord($channelID, $clipName, $verify, $sender);
     }
 
-    public function sendClientWebhook($webhook, $channelID, $clipID, $embeded) {
+    /**
+     * Send Clip to My Discord
+     */
+    public function logToDiscord($channelID, $clipID, $verify, $sender) {
         try {
-            if ($embeded === false) {
-                $hookObject = json_encode([
-                    "embeds" => [
-                        [
-                            "type" => "rich",
-                            "color" => $this->random_color(),
-
-                            "description" => "https://clips.twitch.tv/" . $clipID,
-                            "footer" => [
-                                "text" => "Created with the SOWHOYOUdotCOM Clip Command",
-                                "icon_url" => "https://cdn.betterttv.net/emote/5aa0f2aa156cfc58a4db544c/3x"
-                            ],
-                        ],
-                    ],
-                ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            $webhookurl = $this->auth->discord['clips_webhook']; // CLIPS CHANNEL
+            $channelLink = $this->getChannelLink($channelID);
+            if ($verify === true) {
+                $hookObject = $this->create_embedded($clipID, $sender);
             } else {
-                $hookObject = json_encode([
-                    "content" => "**New Clip!** https://clips.twitch.tv/" . $clipID . "\n> ᴄʟɪᴘ ᴄʀᴇᴀᴛᴇᴅ ᴡɪᴛʜ ᴛʜᴇ ꜱᴏᴡʜᴏʏᴏᴜᴅᴏᴛᴄᴏᴍ ᴄʟɪᴘ ᴄᴏᴍᴍᴀɴᴅ",
-                ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                $hookObject = $this->create_codeblock($clipID, $sender, false, $channelLink);
             }
             $ch = curl_init();
             curl_setopt_array($ch, [
                 CURLOPT_POST => true,
-                CURLOPT_URL => $webhook,
+                CURLOPT_URL => $webhookurl,
+                CURLOPT_POSTFIELDS => $hookObject,
+                CURLOPT_HTTPHEADER => [
+                    "Content-Type: application/json",
+                ],
+            ]);
+            $response = curl_exec($ch);
+            if (curl_errno($ch)) { 
+                error_log('>> Channel ID: ' . $channelID . ' >> Clip ID: ' . $clipID . ' >> Clip Tracker > logToDiscord1 >> ' . curl_error($ch), 0);
+            }
+            curl_close($ch);
+        } catch (Exception $e) {
+            error_log('>> Channel ID: ' . $channelID . ' >> Clip ID: ' . $clipID . ' >> Clip Tracker > logToDiscord s >> ' . $e, 0);
+        }
+    }
+
+    /**
+     * Send Clip to Client Discord
+     */
+    public function sendClientWebhook($webhookurl, $channelID, $clipID, $embedded, $sender) {
+        try {
+            if ($embedded === false) {
+                $hookObject = $this->create_codeblock($clipID, $sender, true, null);
+            } else {
+                $hookObject = $this->create_embedded($clipID, $sender);
+            }
+            $ch = curl_init();
+            curl_setopt_array($ch, [
+                CURLOPT_POST => true,
+                CURLOPT_URL => $webhookurl,
                 CURLOPT_POSTFIELDS => $hookObject,
                 CURLOPT_HTTPHEADER => [
                     "Content-Type: application/json",
@@ -93,57 +93,19 @@ class ClipTracker {
         } catch (Exception $e) {
             error_log('>> Channel ID: ' . $channelID . ' >> Clip ID: ' . $clipID . ' >> Clip Tracker > sendClientWebhook >> ' . $e, 0);
         }
-    }   
-
-    public function logToDiscord($channelID, $clipID) {
-        try {
-            $webhookurl = $this->auth->discord['clips_webhook']; // CLIPS CHANNEL
-            $channelLink = $this->getChannelLink($channelID);
-            $hookObject = json_encode([
-                "username" => "SOWHOYOUdotCOM / CLIPCOMMAND",
-                "tts" => false,
-                "embeds" => [
-                    [
-                        "type" => "rich",
-                        "color" => $this->random_color(),
-
-                        "title" => $channelLink,
-                        "url" => $channelLink,
-
-                        "description" => "https://clips.twitch.tv/" . $clipID,
-                        "footer" => [
-                            "text" => "Created with the SOWHOYOUdotCOM Clip Command",
-                            "icon_url" => "https://cdn.betterttv.net/emote/5aa0f2aa156cfc58a4db544c/3x"
-                        ],
-                    ],
-                ],
-            ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-
-            $ch = curl_init();
-            curl_setopt_array($ch, [
-                CURLOPT_POST => true,
-                CURLOPT_URL => $webhookurl,
-                CURLOPT_POSTFIELDS => $hookObject,
-                CURLOPT_HTTPHEADER => [
-                    "Content-Type: application/json",
-                ],
-            ]);
-            $response = curl_exec($ch);
-            if (curl_errno($ch)) { error_log('>> Channel ID: ' . $channelID . ' >> Clip ID: ' . $clipID . ' >> Clip Tracker > logToDiscord1 >> ' . curl_error($ch), 0); }
-            curl_close($ch);
-        } catch (Exception $e) {
-            error_log('>> Channel ID: ' . $channelID . ' >> Clip ID: ' . $clipID . ' >> Clip Tracker > logToDiscord s >> ' . $e, 0);
-        }
     }
 
+    /**
+     * Get Channel Link for My Discord
+     */
     public function getChannelLink($id) {
         try {
             $curl = curl_init();
             curl_setopt_array($curl, [
                 CURLOPT_RETURNTRANSFER => 1,
                 CURLOPT_HTTPHEADER => [
-                    'Client-ID: ' . $this->auth->twitch['swy_client_id'],
-                    'Authorization: Bearer ' . $this->auth->twitch['swy_oauth_token'],
+                    'Client-ID: ' . $this->auth->twitch['swy_god_token_client_id'],
+                    'Authorization: Bearer ' . $this->auth->twitch['swy_god_token_client_token'],
                 ],
                 CURLOPT_URL => 'https://api.twitch.tv/helix/users?id=' . $id,
             ]);
@@ -161,12 +123,90 @@ class ClipTracker {
         return 'https://www.twitch.tv/' . $id;
     }
     
+    /**
+     * Get Random Color for Codeblock
+     */
     public function random_color() {
         return hexdec(('#' . (str_pad( dechex( mt_rand( 0, 255 ) ), 2, '0', STR_PAD_LEFT)) 
         . (str_pad( dechex( mt_rand( 0, 255 ) ), 2, '0', STR_PAD_LEFT)) . (str_pad( dechex( mt_rand( 0, 255 ) ), 2, '0', STR_PAD_LEFT))));
-    } 
+    }
+
+    /**
+     * Create Codeblock Hook Object
+     */
+    public function create_codeblock($clip, $sender, $is_client, $channel_link = null) {
+        if ($is_client) {
+            if (!empty($sender)) {
+                return json_encode([
+                    "embeds" => [
+                        [
+                            "type" => "rich",
+                            "color" => $this->random_color(),
+
+                            "title" => "A New Clip was Created by: " . $sender,
+
+                            "description" => "https://clips.twitch.tv/" . $clip,
+                            "footer" => [
+                                "text" => "Created with the SOWHOYOUdotCOM Clip Command",
+                                "icon_url" => "https://cdn.betterttv.net/emote/5aa0f2aa156cfc58a4db544c/3x"
+                            ],
+                        ],
+                    ],
+                ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            } else {
+                return json_encode([
+                    "embeds" => [
+                        [
+                            "type" => "rich",
+                            "color" => $this->random_color(),
+
+                            "description" => "https://clips.twitch.tv/" . $clip,
+                            "footer" => [
+                                "text" => "Created with the SOWHOYOUdotCOM Clip Command",
+                                "icon_url" => "https://cdn.betterttv.net/emote/5aa0f2aa156cfc58a4db544c/3x"
+                            ],
+                        ],
+                    ],
+                ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            }
+        } else {
+            return json_encode([
+                "username" => "SOWHOYOUdotCOM / CLIPCOMMAND",
+                "tts" => false,
+                "embeds" => [
+                    [
+                        "type" => "rich",
+                        "color" => $this->random_color(),
+
+                        "title" => (!empty($sender) ? ("A New Clip was Created by: " . $sender) : $channel_link),
+                        "url" => $channel_link,
+
+                        "description" => "https://clips.twitch.tv/" . $clip,
+                        "footer" => [
+                            "text" => "Created with the SOWHOYOUdotCOM Clip Command",
+                            "icon_url" => "https://cdn.betterttv.net/emote/5aa0f2aa156cfc58a4db544c/3x"
+                        ],
+                    ],
+                ],
+            ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        }
+    }
+
+    /**
+     * Create Embed Hook Object
+     */
+    public function create_embedded($clip, $sender) {
+        if (!empty($sender)) {
+            return json_encode([
+                "content" => "**A New Clip was Created by: " . $sender . "**\nhttps://clips.twitch.tv/" . $clip . "\n> ᴄʟɪᴘ ᴄʀᴇᴀᴛᴇᴅ ᴡɪᴛʜ ᴛʜᴇ ꜱᴏᴡʜᴏʏᴏᴜᴅᴏᴛᴄᴏᴍ ᴄʟɪᴘ ᴄᴏᴍᴍᴀɴᴅ",
+            ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        } else {
+            return json_encode([
+                "content" => "**New Clip!** https://clips.twitch.tv/" . $clip . "\n> ᴄʟɪᴘ ᴄʀᴇᴀᴛᴇᴅ ᴡɪᴛʜ ᴛʜᴇ ꜱᴏᴡʜᴏʏᴏᴜᴅᴏᴛᴄᴏᴍ ᴄʟɪᴘ ᴄᴏᴍᴍᴀɴᴅ",
+            ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        }
+    }
 
 }
 
 ?>
-
